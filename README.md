@@ -28,6 +28,9 @@ instants now always produce one local datetime. Local gaps return
 `time_not_exists`; overlaps return standard first and daylight second, preserving
 qdate's selection contract. Transition sides are classified by their actual DST
 flags rather than assuming CCTZ's `pre` and `post` mean standard and daylight.
+The `local_to_local_dst/3` wrapper retains qdate's explicit daylight preference
+on both source and target zones, including its legacy target-overlap
+interpretation. Use `utc_to_local/2` for direct instant conversion.
 Overlaps with equal DST flags prefer the later instant first. Explicit tuples
 passed to `localtime_dst:check/2` still evaluate the supplied recurring rule.
 
@@ -35,16 +38,22 @@ OS rules also correct historical behavior outside Canada, so this changes more
 than the targeted 1.2.3 fix. Abbreviations follow IANA (including numeric names);
 `tz_shift/2` returns `{error, subminute_offset}` for historical offsets that its
 minute-based interface cannot represent. Conversion itself retains seconds.
-The legacy abbreviation index is retained for compatibility; prefer canonical
-IANA names for new configuration. Unknown zones do not fall back to old rules.
+Common US abbreviations and CET/CEST map to stable canonical regions, so the
+first entry in the old abbreviation index cannot redirect CST to historical
+Mountain time or CET to historical GMT. Other abbreviations retain the legacy
+index. Unqualified GMT+N keeps qdate's east-of-UTC convention; explicit
+Etc/GMT+N retains IANA's POSIX sign. Prefer canonical IANA names for new
+configuration. Unknown zones do not fall back to old rules.
 
 Updating files or restarting just the `elocaltime` application does not clear
 CCTZ's cache. Roll out tzdata with a **full Erlang VM restart**.
 
 The regression workflow builds the native dependency on OTP 26, 27 and 28, runs
-393 EUnit cases and nine native integrity cases, and compares Canadian results
+402 EUnit cases and nine native integrity cases, and compares Canadian results
 against 4,185 vectors from the checksum-pinned official IANA 2026e archive. The
 archive is compiled for CI only; it is not bundled as the production database.
+Separate consumer checks run all 157 parent qdate tests at both Kazoo dependency
+pins, without modifying qdate source or its expected results.
 For manual tests, build the patched native dependency first and include its
 parent directory in `ERL_LIBS`:
 

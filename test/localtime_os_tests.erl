@@ -27,3 +27,21 @@ unknown_zone_test_() ->
     Date = {{2026,12,1},{12,0,0}},
     [?_assertEqual({error, unknown_tz}, localtime:utc_to_local(Date, Zone))
      || Zone <- ["Unknown/Zone", "../etc/passwd", "/etc/passwd", "file:/etc/passwd", ""]].
+
+legacy_alias_test_() ->
+    Date = {{1970,1,1},{0,0,0}},
+    [?_assertEqual(21600, calendar:datetime_to_gregorian_seconds(
+                    localtime:local_to_utc(Date, "CST")) - 62167219200),
+     ?_assertEqual({{1970,1,1},{1,0,0}}, localtime:utc_to_local(Date, "CET")),
+     ?_assertEqual({{1970,1,1},{1,0,0}}, localtime:utc_to_local(Date, "GMT+1")),
+     ?_assertEqual({{1969,12,31},{23,0,0}}, localtime:utc_to_local(Date, "GMT-1")),
+     ?_assertEqual({{1969,12,31},{23,0,0}}, localtime:utc_to_local(Date, "Etc/GMT+1")),
+     ?_assertEqual({{1970,1,1},{1,0,0}}, localtime:utc_to_local(Date, "Etc/GMT-1")),
+     ?_assertEqual("America/Los_Angeles", localtime:get_timezone("PST")),
+     ?_assertEqual("America/Chicago", localtime:get_timezone(<<"CDT">>))].
+
+qdate_target_preference_test() ->
+    Date = {{2013,11,3},{6,0,0}},
+    ?assertEqual({{2013,11,3},{1,0,0}}, localtime:utc_to_local(Date, "America/New_York")),
+    ?assertEqual({{2013,11,3},{1,0,0}}, localtime:local_to_local(Date, "GMT", "America/New_York")),
+    ?assertEqual({{2013,11,3},{2,0,0}}, localtime:local_to_local_dst(Date, "GMT", "America/New_York")).

@@ -67,9 +67,9 @@ local_to_local(LocalDateTime, TimezoneFrom, TimezoneTo) ->
 local_to_local_dst(LocalDateTime, TimezoneFrom, TimezoneTo) ->
    case local_to_utc(LocalDateTime, TimezoneFrom) of
       UtcDateTime = {{_,_,_},{_,_,_}} ->
-         LocalDateTime2 = utc_to_local(UtcDateTime, TimezoneTo);
+         LocalDateTime2 = localtime_os:utc_to_local_dst(UtcDateTime, TimezoneTo);
       [{{_,_,_},{_,_,_}}, UtcDateTime] ->
-         LocalDateTime2 = utc_to_local(UtcDateTime, TimezoneTo);
+         LocalDateTime2 = localtime_os:utc_to_local_dst(UtcDateTime, TimezoneTo);
       Res ->
          LocalDateTime2 = Res
    end,
@@ -166,6 +166,25 @@ tr_char([H|T], From, To, Acc) ->
 -define(SPACE_CHAR, 32).
 get_timezone_inner(TimeZone) when is_binary(TimeZone) ->
     get_timezone_inner(erlang:binary_to_list(TimeZone));
+%% Keep qdate's familiar short names stable. The old generated index picked
+%% the first region with that abbreviation in the 2015 snapshot; those regions
+%% can have different historical rules or change their clocks independently.
+get_timezone_inner("PST") -> "America/Los_Angeles";
+get_timezone_inner("PDT") -> "America/Los_Angeles";
+get_timezone_inner("MST") -> "America/Denver";
+get_timezone_inner("MDT") -> "America/Denver";
+get_timezone_inner("CST") -> "America/Chicago";
+get_timezone_inner("CDT") -> "America/Chicago";
+get_timezone_inner("EST") -> "America/New_York";
+get_timezone_inner("EDT") -> "America/New_York";
+get_timezone_inner("CET") -> "Europe/Paris";
+get_timezone_inner("CEST") -> "Europe/Paris";
+%% qdate's unqualified GMT+N means east of UTC. Explicit Etc/GMT+N keeps
+%% IANA's POSIX convention, so canonical names are not rewritten.
+get_timezone_inner("GMT+" ++ Hours = Zone) ->
+    legacy_gmt_zone(Hours, "Etc/GMT-", Zone);
+get_timezone_inner("GMT-" ++ Hours = Zone) ->
+    legacy_gmt_zone(Hours, "Etc/GMT+", Zone);
 get_timezone_inner(TimeZone) when is_list(TimeZone) ->
    TimeZoneNoSpaces = tr_char(TimeZone, ?SPACE_CHAR, $_),
    case tz_index:lookup(TimeZoneNoSpaces) of
@@ -176,6 +195,13 @@ get_timezone_inner(TimeZone) when is_list(TimeZone) ->
    end;
 get_timezone_inner(TZ) ->
     throw({error, "Timezone should be string/binary", {provided_timezone, TZ}}).
+
+legacy_gmt_zone([], _Prefix, Original) -> Original;
+legacy_gmt_zone(Hours, Prefix, Original) ->
+    case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Hours) of
+        true -> Prefix ++ Hours;
+        false -> Original
+    end.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

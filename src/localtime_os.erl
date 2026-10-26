@@ -1,10 +1,27 @@
 %% OS zoneinfo provider. No fallback to the bundled recurring-rule snapshot.
 -module(localtime_os).
 -include_lib("elocaltime/include/elocaltime.hrl").
--export([utc_to_local/2, local_to_utc/2, tz_name/2, tz_shift/2, dst/2]).
+-export([utc_to_local/2, utc_to_local_dst/2, local_to_utc/2, tz_name/2, tz_shift/2, dst/2]).
 
 utc_to_local(Date, Zone) ->
     case absolute(Date, Zone) of
+        {ok, #absolute_lookup{date = Local}} -> Local;
+        Error -> Error
+    end.
+
+%% qdate's explicit prefer_daylight API historically applies its preference
+%% to both source and target zones. Keep that wrapper convention here rather
+%% than making the direct UTC instant conversion return ambiguous results.
+utc_to_local_dst(Date, Zone) ->
+    case absolute(Date, Zone) of
+        {ok, #absolute_lookup{date = Local, is_dst = false}} ->
+            case local_infos(Local, Zone) of
+                {ok, [{Standard, #absolute_lookup{is_dst = false}},
+                      {Daylight, #absolute_lookup{is_dst = true}}]} ->
+                    calendar:gregorian_seconds_to_datetime(
+                        calendar:datetime_to_gregorian_seconds(Local) + Standard - Daylight);
+                _ -> Local
+            end;
         {ok, #absolute_lookup{date = Local}} -> Local;
         Error -> Error
     end.
