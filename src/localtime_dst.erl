@@ -17,17 +17,10 @@
 %  DateTime = DateTime()
 %  TimeZone = tuple()
 check(DateTime, Timezone) when is_list(Timezone); is_binary(Timezone) ->
-    case localtime_tzdata:lookup(localtime:get_timezone(Timezone), DateTime, local) of
-        false ->
-            {error, unknown_tz};
-        TZ -> 
-            check(DateTime, TZ)
-    end;
-check(DateTime, {Timezone, _, _, _, _, _, _, _, _}=Rule) ->
-   case localtime_tzdata:dst(DateTime, Timezone) of
-      legacy -> check_rule(DateTime, Rule);
-      Result -> Result
-   end.
+    localtime_os:dst(DateTime, Timezone);
+%% An explicitly supplied recurring rule retains its existing contract.
+check(DateTime, {_, _, _, _, _, _, _, _, _}=Rule) ->
+   check_rule(DateTime, Rule).
 
 check_rule(_DateTime, {_, _, undef, _, _, undef, _, undef, _}) ->
    is_not_in_dst;

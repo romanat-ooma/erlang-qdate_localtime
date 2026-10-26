@@ -24,11 +24,38 @@ jobs:
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: ${{ matrix.otp }}
-      - name: Compile and run EUnit
-        run: bash test/run.sh
-      - name: Compare with pinned IANA 2026e
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: silviucpp/elocaltime
+          ref: cd6dfaf735a57e0f8f82b0caf02adba813c39519
+          path: _build/ci_native/elocaltime
+          persist-credentials: false
+      - name: Prepare pinned timezone data
         run: |
           curl --fail --location --retry 3 \
             https://data.iana.org/time-zones/releases/tzdata2026e.tar.gz \
             --output "$RUNNER_TEMP/tzdata2026e.tar.gz"
-          python3 test/check_iana.py "$RUNNER_TEMP/tzdata2026e.tar.gz"
+          echo "b26882805f26aac59d5b222978e6580484b834ccdc98be89df2f05a6dc53a652  $RUNNER_TEMP/tzdata2026e.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/tzsource" "$RUNNER_TEMP/zoneinfo"
+          tar -xzf "$RUNNER_TEMP/tzdata2026e.tar.gz" -C "$RUNNER_TEMP/tzsource"
+          cd "$RUNNER_TEMP/tzsource"
+          zic -d "$RUNNER_TEMP/zoneinfo" africa antarctica asia australasia europe northamerica southamerica etcetera backward
+      - name: Build native prototype and run integrity cases
+        run: |
+          cd _build/ci_native/elocaltime
+          git apply "$GITHUB_WORKSPACE/test/elocaltime-timestamp-range.patch"
+          make compile_nif
+          mkdir ebin
+          erlc +debug_info -I include -o ebin src/*.erl test/integrity_test_SUITE.erl
+          cp src/elocaltime.app.src ebin/elocaltime.app
+          ERL_LIBS="$GITHUB_WORKSPACE/_build/ci_native" TZDIR="$RUNNER_TEMP/zoneinfo" erl -noshell -eval '
+            []=integrity_test_SUITE:init_per_suite([]),
+            [{elocaltime_tests,_,Tests}]=integrity_test_SUITE:groups(),
+            lists:foreach(fun(Test)->true=apply(integrity_test_SUITE,Test,[[]]) end,Tests),
+            io:format("Native integrity suite: ~p cases passed~n",[length(Tests)]), halt().'
+      - name: Compile and run EUnit
+        run: ERL_LIBS="$GITHUB_WORKSPACE/_build/ci_native" TZDIR="$RUNNER_TEMP/zoneinfo" bash test/run.sh
+      - name: Compare with pinned IANA 2026e
+        run: |
+          ERL_LIBS="$GITHUB_WORKSPACE/_build/ci_native" TZDIR="$RUNNER_TEMP/zoneinfo" \
+            python3 test/check_iana.py "$RUNNER_TEMP/tzdata2026e.tar.gz"

@@ -27,22 +27,7 @@
 %  DstLocalDateTime = DateTime()
 %  ErrDescr = atom(), unknown_tz
 utc_to_local(UtcDateTime, Timezone) ->
-   case localtime_tzdata:lookup(get_timezone(Timezone), UtcDateTime, utc) of
-      false ->
-         {error, unknown_tz};
-      {_Tz, _, _, Shift, _DstShift, undef, _DstStartTime, undef, _DstEndTime} ->
-         adjust_datetime(UtcDateTime, Shift);
-      TzRule = {_, _, _, Shift, DstShift, _, _, _, _} ->
-         LocalDateTime = adjust_datetime(UtcDateTime, Shift),
-         case localtime_dst:check(LocalDateTime, TzRule) of
-            Res when (Res == is_in_dst) or (Res == time_not_exists) ->
-               adjust_datetime(LocalDateTime, DstShift);
-            is_not_in_dst ->
-               LocalDateTime;
-            ambiguous_time ->
-               [LocalDateTime, adjust_datetime(LocalDateTime, DstShift)]
-         end
-   end.
+   localtime_os:utc_to_local(UtcDateTime, Timezone).
 
 % local_to_utc(LocalDateTime, Timezone) -> UtcDateTime | [UtcDateTime, DstUtcDateTime] | time_not_exists | {error, ErrDescr}
 %  LocalDateTime = DateTime()
@@ -51,24 +36,7 @@ utc_to_local(UtcDateTime, Timezone) ->
 %  DstUtcDateTime = DateTime()
 %  ErrDescr = atom(), unknown_tz
 local_to_utc(LocalDateTime, Timezone) ->
-   case localtime_tzdata:lookup(get_timezone(Timezone), LocalDateTime, local) of
-      false ->
-         {error, unknown_tz};
-      {_Tz, _, _, Shift, _DstShift, undef, _DstStartTime, undef, _DstEndTime} ->
-         adjust_datetime(LocalDateTime, invert_shift(Shift));
-      TzRule = {_, _, _, Shift, DstShift, _, _, _, _} ->
-         UtcDateTime = adjust_datetime(LocalDateTime, invert_shift(Shift)),
-         case localtime_dst:check(LocalDateTime, TzRule) of
-            is_in_dst ->
-               adjust_datetime(UtcDateTime, invert_shift(DstShift));
-            is_not_in_dst ->
-               UtcDateTime;
-            ambiguous_time ->
-               [UtcDateTime, adjust_datetime(UtcDateTime, invert_shift(DstShift))];
-            time_not_exists ->
-               time_not_exists
-         end
-   end.
+   localtime_os:local_to_utc(LocalDateTime, Timezone).
 
 % local_to_local(LocalDateTime, TimezoneFrom, TimezoneTo) -> LocalDateTime | ambiguous | time_not_exists | {error, ErrDescr}
 %  LocalDateTime = DateTime()
@@ -124,23 +92,7 @@ local_to_local_dst(LocalDateTime, TimezoneFrom, TimezoneTo) ->
 tz_name(_UtcDateTime, "UTC") ->
    {"UTC", "UTC"};
 tz_name(LocalDateTime, Timezone) ->
-   case localtime_tzdata:lookup(get_timezone(Timezone), LocalDateTime, local) of
-      false ->
-         {error, unknown_tz};
-      {_Tz, StdName, undef, _Shift, _DstShift, undef, _DstStartTime, undef, _DstEndTime} ->
-         StdName;
-      TzRule = {_, StdName, DstName, _Shift, _DstShift, _, _, _, _} ->
-         case localtime_dst:check(LocalDateTime, TzRule) of
-            is_in_dst ->
-               DstName;
-            is_not_in_dst ->
-               StdName;
-            ambiguous_time ->
-               {StdName, DstName};
-            time_not_exists ->
-               unable_to_detect
-         end
-   end.
+   localtime_os:tz_name(LocalDateTime, Timezone).
 
 % tz_shift(LocalDateTime, Timezone) ->  Shift | {Shift, DstSift} | unable_to_detect | {error, ErrDesc}
 %  returns time shift from GMT
@@ -154,23 +106,7 @@ tz_name(LocalDateTime, Timezone) ->
 tz_shift(_UtcDateTime, "UTC") ->
    0;
 tz_shift(LocalDateTime, Timezone) ->
-   case localtime_tzdata:lookup(get_timezone(Timezone), LocalDateTime, local) of
-      false ->
-         {error, unknown_tz};
-      {_Tz, _StdName, undef, Shift, _DstShift, undef, _DstStartTime, undef, _DstEndTime} ->
-         fmt_min(Shift);
-      TzRule = {_, _StdName, _DstName, Shift, DstShift, _, _, _, _} ->
-         case localtime_dst:check(LocalDateTime, TzRule) of
-            is_in_dst ->
-               fmt_min(Shift + DstShift);
-            is_not_in_dst ->
-               fmt_min(Shift);
-            ambiguous_time ->
-               {fmt_min(Shift), fmt_min(Shift + DstShift)};
-            time_not_exists ->
-               unable_to_detect
-         end
-   end.
+   localtime_os:tz_shift(LocalDateTime, Timezone).
 
 % the same as tz_shift/2, but calculates time difference between two local timezones
 tz_shift(LocalDateTime, TimezoneFrom, TimezoneTo) ->
@@ -199,9 +135,6 @@ list_timezones() ->
 % =======================================================================
 % privates
 % =======================================================================
-
-invert_shift(Minutes) ->
-   -Minutes.
 
 fmt_min(Shift) when Shift < 0 ->
    {'-', abs(Shift) div 60, abs(Shift) rem 60};
@@ -254,11 +187,11 @@ tr_char_test() ->
 
 tz_name_test() ->
    ?assertEqual({"CET", "CET"}, tz_name({{2008,12,10},{15,30,0}}, "Europe/Amsterdam")),
-   %%% No DST in Iran
-   ?assertEqual({"IRST", "IRST"}, tz_name({{2008,12,10},{15,30,0}}, "Asia/Tehran")),
-   ?assertEqual({"IRST", "IRST"}, tz_name({{2020,5,4},{15,30,0}}, "Asia/Tehran")),
-   ?assertEqual({"IRST", "IRST"}, tz_name({{2008,12,10},{15,30,0}}, "Iran")),
-   ?assertEqual({"IRST", "IRST"}, tz_name({{2020,5,4},{15,30,0}}, "Iran")).
+   %% IANA uses numeric abbreviations for Iran. Iran observed DST in 2020.
+   ?assertEqual({"+0330", "+0330"}, tz_name({{2008,12,10},{15,30,0}}, "Asia/Tehran")),
+   ?assertEqual({"+0430", "+0430"}, tz_name({{2020,5,4},{15,30,0}}, "Asia/Tehran")),
+   ?assertEqual({"+0330", "+0330"}, tz_name({{2008,12,10},{15,30,0}}, "Iran")),
+   ?assertEqual({"+0430", "+0430"}, tz_name({{2020,5,4},{15,30,0}}, "Iran")).
 
 get_timezone_test() ->
    ?assertEqual("America/Los_Angeles", get_timezone("America/Los Angeles")).

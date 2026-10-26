@@ -1,0 +1,172 @@
+diff --git a/c_src/Makefile b/c_src/Makefile
+index f530719..22de66e 100644
+--- a/c_src/Makefile
++++ b/c_src/Makefile
+@@ -14,6 +14,7 @@ ifeq ($(UNAME_SYS), darwin)
+ 				-Wl,-U,_enif_get_resource \
+ 				-Wl,-U,_enif_get_tuple \
+ 				-Wl,-U,_enif_get_ulong \
++				-Wl,-U,_enif_get_long \
+ 				-Wl,-U,_enif_make_atom \
+ 				-Wl,-U,_enif_make_existing_atom \
+ 				-Wl,-U,_enif_make_new_binary \
+@@ -21,6 +22,7 @@ ifeq ($(UNAME_SYS), darwin)
+                 -Wl,-U,_enif_make_int \
+                 -Wl,-U,_enif_make_resource \
+                 -Wl,-U,_enif_make_ulong \
++                -Wl,-U,_enif_make_long \
+ 				-Wl,-U,_enif_alloc \
+ 				-Wl,-U,_enif_free \
+ 				-Wl,-U,_enif_alloc_resource \
+diff --git a/c_src/elocaltime.cc b/c_src/elocaltime.cc
+index f51caba..5daf07f 100644
+--- a/c_src/elocaltime.cc
++++ b/c_src/elocaltime.cc
+@@ -10,17 +10,20 @@
+ 
+ namespace {
+ 
++// Keep whole seconds throughout: the platform clock duration can overflow at 2262.
++using TimePoint = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
++
+ cctz::time_zone kUtcTz = cctz::utc_time_zone();
+ 
+ const char kUnknownTimezone[] = "unknown timezone";
+ 
+-std::chrono::system_clock::time_point timestamp2tp(uint64_t ts)
++TimePoint timestamp2tp(int64_t ts)
+ {
+-    std::chrono::duration<uint64_t> sec(ts);
+-    return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(sec));
++    std::chrono::duration<int64_t> sec(ts);
++    return TimePoint(sec);
+ }
+ 
+-uint64_t tp2timestamp(const std::chrono::system_clock::time_point& tp)
++int64_t tp2timestamp(const TimePoint& tp)
+ {
+     return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count();
+ }
+@@ -55,10 +58,10 @@ public:
+     void load_utc_timezone();
+     void load_local_timezone();
+     void load_fixed_timezone(int32_t offset);
+-    std::string format(const std::string& format, std::chrono::system_clock::time_point tp);
++    std::string format(const std::string& format, TimePoint tp);
+ 
+     cctz::time_zone::civil_lookup lookup(const cctz::civil_second& sec);
+-    cctz::time_zone::absolute_lookup lookup(uint64_t seconds);
++    cctz::time_zone::absolute_lookup lookup(int64_t seconds);
+ 
+ private:
+     
+@@ -92,12 +95,12 @@ cctz::time_zone::civil_lookup TimeZoneWrapper::lookup(const cctz::civil_second&
+     return tz_.lookup(sec);
+ }
+ 
+-cctz::time_zone::absolute_lookup TimeZoneWrapper::lookup(uint64_t seconds)
++cctz::time_zone::absolute_lookup TimeZoneWrapper::lookup(int64_t seconds)
+ {
+     return tz_.lookup(timestamp2tp(seconds));
+ }
+ 
+-std::string TimeZoneWrapper::format(const std::string& format, std::chrono::system_clock::time_point tp)
++std::string TimeZoneWrapper::format(const std::string& format, TimePoint tp)
+ {
+     return cctz::format(format, tp, tz_);
+ }
+@@ -171,15 +174,15 @@ ERL_NIF_TERM enif_timezone_absolute_lookup(ErlNifEnv* env, int argc, const ERL_N
+     elocatime_data* data = static_cast<elocatime_data*>(enif_priv_data(env));
+ 
+     enif_timezone* timezone;
+-    unsigned long timestamp;
++    ErlNifSInt64 timestamp;
+ 
+     if(!enif_get_resource(env, argv[1], data->res_timezone, (void**)&timezone))
+         return make_badarg(env);
+ 
+-    if(!enif_get_uint64(env, argv[0], &timestamp))
++    if(!enif_get_int64(env, argv[0], &timestamp))
+         return make_badarg(env);
+ 
+-    cctz::time_zone::absolute_lookup lookup = timezone->tz->lookup(static_cast<uint64_t>(timestamp));
++    cctz::time_zone::absolute_lookup lookup = timezone->tz->lookup(static_cast<int64_t>(timestamp));
+ 
+     ERL_NIF_TERM nif_date = enif_make_tuple3(env,
+                                              enif_make_int(env, lookup.cs.year()),
+@@ -238,9 +241,9 @@ ERL_NIF_TERM enif_timezone_civil_lookup(ErlNifEnv* env, int argc, const ERL_NIF_
+     return make_ok_result(env, enif_make_tuple5(env,
+                                                 ATOMS.atomCivilLookup,
+                                                 kind2atom(lookup.kind),
+-                                                enif_make_uint64(env, tp2timestamp(lookup.pre)),
+-                                                enif_make_uint64(env, tp2timestamp(lookup.trans)),
+-                                                enif_make_uint64(env, tp2timestamp(lookup.post))));
++                                                enif_make_int64(env, tp2timestamp(lookup.pre)),
++                                                enif_make_int64(env, tp2timestamp(lookup.trans)),
++                                                enif_make_int64(env, tp2timestamp(lookup.post))));
+ }
+ 
+ ERL_NIF_TERM enif_format(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+@@ -250,12 +253,12 @@ ERL_NIF_TERM enif_format(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+     elocatime_data* data = static_cast<elocatime_data*>(enif_priv_data(env));
+ 
+     std::string format;
+-    unsigned long timestamp;
++    ErlNifSInt64 timestamp;
+ 
+     if(!get_string(env, argv[0], &format))
+         return make_badarg(env);
+ 
+-    if(!enif_get_uint64(env, argv[1], &timestamp))
++    if(!enif_get_int64(env, argv[1], &timestamp))
+         return make_badarg(env);
+ 
+     if(argc == 3)
+diff --git a/include/elocaltime.hrl b/include/elocaltime.hrl
+index cb09e25..0ee8b3e 100644
+--- a/include/elocaltime.hrl
++++ b/include/elocaltime.hrl
+@@ -11,7 +11,7 @@
+ -define(CIVIL_KIND_SKIPPED, skipped).
+ -define(CIVIL_KIND_REPEATED, repeated).
+ 
+--type timestamp() :: non_neg_integer().
++-type timestamp() :: integer().
+ -type civil_kind() :: ?CIVIL_KIND_REPEATED | ?CIVIL_KIND_UNIQUE | ?CIVIL_KIND_SKIPPED.
+ 
+ -record(absolute_lookup, {
+diff --git a/test/integrity_test_SUITE.erl b/test/integrity_test_SUITE.erl
+index f0aa1be..f075d13 100644
+--- a/test/integrity_test_SUITE.erl
++++ b/test/integrity_test_SUITE.erl
+@@ -17,7 +17,8 @@ groups() -> [
+         local2utc_ts,
+         utc2local_xx,
+         is_timezone_valid,
+-        test_format
++        test_format,
++        timestamp_range
+     ]}
+ ].
+ 
+@@ -28,6 +29,20 @@ init_per_suite(Config) ->
+ end_per_suite(_Config) ->
+     elocaltime:stop().
+ 
++%% Negative Unix timestamps must remain signed. Converting second-resolution
++%% timestamps through the platform nanosecond clock overflows after 2262.
++timestamp_range(_Config) ->
++    lists:foreach(fun(Year) ->
++        Date = {{Year,1,15},{12,0,0}},
++        Stamp = elocaltime_utils:datetime2ts(Date),
++        {ok, Date} = elocaltime:utc2local_datetime(Date, ?TIMEZONE_UTC),
++        {ok, #civil_lookup{civil_kind = unique, pre = Stamp, post = Stamp}} =
++            elocaltime:civil_lookup(Date, ?TIMEZONE_UTC),
++        Expected = list_to_binary(io_lib:format("~4..0B-01-15 12:00:00", [Year])),
++        {ok, Expected} = elocaltime:format(<<"%E4Y-%m-%d %H:%M:%S">>, Stamp)
++    end, [1, 1900, 1960, 1970, 2038, 2263, 2300, 9999]),
++    true.
++
+ test_timezone(_Config) ->
+     {ok,{{2017,3,26},{2,0,0}}} = elocaltime:utc2local_datetime({{2017,3,26},{0,0,0}}, <<"Europe/Bucharest">>),
+     {ok,{{2017,3,26},{0,0,0}}} = elocaltime:utc2local_datetime({{2017,3,26},{0,0,0}}, ?TIMEZONE_UTC),

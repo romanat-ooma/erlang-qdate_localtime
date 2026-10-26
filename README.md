@@ -8,35 +8,50 @@ but have diverged slightly over the years.  The qdate tests will not pass if the
 original `erlang_localtime dependency` is used due to some subtle differences
 to attempt to make qdate a little bit smarter.
 
-#### Canadian rules effective in 2026
+#### OS tzdata prototype (2.0.0-prototype)
 
-Version 1.2.3 includes upstream 1.2.2 and the dated Canadian corrections below.
+This branch evaluates replacing the recurring timezone snapshot with
+[`elocaltime`](https://github.com/silviucpp/elocaltime) and Google CCTZ. Conversion
+rules come from the runtime machine's `/usr/share/zoneinfo`, or `TZDIR` set before
+starting the Erlang VM. Containers use their own files. Install and record a
+current OS `tzdata` package; this library does not download timezone updates.
 
-The date being converted selects the timezone rules. For Vancouver, Edmonton,
-Inuvik, Winnipeg and their retained aliases, conversions before the 2026 change
-keep the existing seasonal rules. Conversions after the change use permanent
-UTC-7, UTC-6, UTC-6 and UTC-5 respectively. This selection applies to UTC/local
-conversion, offset/name lookup and direct `localtime_dst:check/2` calls.
+**This is a viability prototype, not a release dependency.** The pinned upstream
+`elocaltime` 1.5.1 needs the signed-timestamp/clock-resolution correction in
+`test/elocaltime-timestamp-range.patch`. CI applies that patch to the pinned
+upstream source. A production version must publish that native fix and update
+the dependency ref before the adapter can be released. The patch avoids rejected
+pre-1970 timestamps and incorrect years after 2262.
 
-The corrections follow [IANA tzdata 2026e](https://www.iana.org/time-zones/releases/2026e),
-including its modeled abbreviation/DST transition at 02:00 local daylight time
-on November 1, 2026. At that instant the UTC offset stays the same; the final
-daylight names PDT/MDT/CDT become MST/CST/EST. The former 01:00 overlap is
-cancelled. Earlier timestamps and unrelated zones retain the legacy snapshot;
-this is a targeted correction, not a complete upgrade of that snapshot.
+The existing `localtime` entry points and return shapes remain available. UTC
+instants now always produce one local datetime. Local gaps return
+`time_not_exists`; overlaps return standard first and daylight second, preserving
+qdate's selection contract. Transition sides are classified by their actual DST
+flags rather than assuming CCTZ's `pre` and `post` mean standard and daylight.
+Overlaps with equal DST flags prefer the later instant first. Explicit tuples
+passed to `localtime_dst:check/2` still evaluate the supplied recurring rule.
 
-Run the existing and Canadian regression tests with the installed Erlang tools:
+OS rules also correct historical behavior outside Canada, so this changes more
+than the targeted 1.2.3 fix. Abbreviations follow IANA (including numeric names);
+`tz_shift/2` returns `{error, subminute_offset}` for historical offsets that its
+minute-based interface cannot represent. Conversion itself retains seconds.
+The legacy abbreviation index is retained for compatibility; prefer canonical
+IANA names for new configuration. Unknown zones do not fall back to old rules.
+
+Updating files or restarting just the `elocaltime` application does not clear
+CCTZ's cache. Roll out tzdata with a **full Erlang VM restart**.
+
+The regression workflow builds the native dependency on OTP 26, 27 and 28, runs
+393 EUnit cases and nine native integrity cases, and compares Canadian results
+against 4,185 vectors from the checksum-pinned official IANA 2026e archive. The
+archive is compiled for CI only; it is not bundled as the production database.
+For manual tests, build the patched native dependency first and include its
+parent directory in `ERL_LIBS`:
 
 ```sh
-bash test/run.sh
-```
-
-An independent comparison compiles the official IANA archive with `zic` and
-uses Python's `zoneinfo` to generate conversion, name, DST and offset vectors.
-It requires Python 3.12+, `zic` and `escript`, and verifies the archive's SHA256:
-
-```sh
-python3 test/check_iana.py /path/to/tzdata2026e.tar.gz
+ERL_LIBS=/path/to/native-apps TZDIR=/path/to/zoneinfo bash test/run.sh
+ERL_LIBS=/path/to/native-apps TZDIR=/path/to/zoneinfo \
+  python3 test/check_iana.py /path/to/tzdata2026e.tar.gz
 ```
 
 #### Public exports
@@ -55,40 +70,20 @@ is not in daylight saving, it will be corrected by library and "MSK" -> "PST" co
 
 #### Examples of usage
 
-Converts UTC time to local one
->localtime:utc_to_local({{2010, 7, 22}, {17, 56, 23}, "Europe/Moscow").
->
->{{2010,10,10},{21,56,23}}
+With OS tzdata 2026e, UTC conversion uses the rules at the event date:
 
-Converts local time to UTC one
->localtime:local_to_utc({{2010, 10, 10}, {21, 56, 23}}, "Europe/Moscow").
->
->{{2010,10,10},{17,56,23}}
+```erlang
+localtime:utc_to_local({{2026,1,15},{20,0,0}}, "America/Vancouver").
+%% {{2026,1,15},{12,0,0}}
+localtime:utc_to_local({{2026,12,1},{20,0,0}}, "America/Vancouver").
+%% {{2026,12,1},{13,0,0}}
+```
 
-Converts time from one local timezone to another local one
->localtime:local_to_local({{2010, 10, 10}, {21, 56, 23}}, "Europe/Moscow", "Australia/Sydney").
->
->{{2010,10,11},{3,56,23}}
+Local overlaps and gaps keep qdate's existing return conventions:
 
-Returns timezone name
->localtime:tz_name({{2010, 10, 10}, {21, 56, 23}}, "Europe/Moscow").
->
->{"MSK","MSK"}
-
->localtime:tz_name({{2010,10,11},{3,56,23}}, "Australia/Sydney").
->
->{"EST","EST"}
-
-Calculates time difference between UTC and local one
->localtime:tz_shift({{2013, 01, 22}, {18, 17, 00}}, "Europe/Moscow").
->
->{'+',4,0}
-
->localtime:tz_shift({{2013, 01, 22}, {18, 17, 00}}, "America/New York").
->
->{'-',5,0}
-
-Calculates time difference between two local timezones
->localtime:tz_shift({{2013, 01, 22}, {18, 17, 00}}, "America/New York", "Europe/Moscow").
->
->{'+',9,0}
+```erlang
+localtime:local_to_utc({{2026,11,1},{1,30,0}}, "America/Los_Angeles").
+%% [{{2026,11,1},{9,30,0}}, {{2026,11,1},{8,30,0}}]
+localtime:local_to_utc({{2027,3,14},{2,30,0}}, "America/Los_Angeles").
+%% time_not_exists
+```

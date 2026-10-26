@@ -71,8 +71,7 @@ zone_tests(Zone, Shift, WinterName, DaylightName, PermanentName) ->
     ,?_assertEqual(shift(December, -Shift), localtime:local_to_local_dst(December, Zone, "UTC"))
     ,?_assertEqual(December, localtime:local_to_local(shift(December, -Shift), "UTC", Zone))
     ,?_assertEqual({'+', abs(Shift) div 60, 0}, localtime:tz_shift(December, Zone, "UTC"))
-    ,?_assertEqual(is_not_in_dst,
-                   localtime_dst:check(December, localtime_tzdata:lookup(Zone, Winter, local)))
+
     ].
 
 unaffected_zones_test_() ->

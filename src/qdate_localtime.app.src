@@ -1,8 +1,8 @@
 {application, 'qdate_localtime',
  [
   {description, "Erlang library for conversion from one local time to another (forked specifically for qdate compatibility)"},
-  {vsn, "1.2.3"},
-  {applications, [kernel, stdlib]},
+  {vsn, "2.0.0-prototype"},
+  {applications, [kernel, stdlib, elocaltime]},
   {modules, []},
   {registered, []},
   {env, []},
